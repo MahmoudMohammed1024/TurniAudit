@@ -130,14 +130,25 @@ class TurnitinStrictAuditor:
                            re.search(rb'1\s+1\s+1\s+rg[\s\S]{1,60}?re\s*(?:h\s*)?[BfbF]', raw_bytes) or
                            re.search(rb'1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[\d\.\s]+re\s*[BfbF]', raw_bytes))
 
-        # 4. فحص محركات وأدوات التزوير الخارجية غير الرسمية
+        # 4. فحص بصمة قالب الغلاف الاصطناعي (pdf-lib drawText Synthesizer Footprint)
+        has_pdflib_synthesizer = False
+        p1_streams = b""
+        if page_count > 0:
+            for x in doc[0].get_contents():
+                p1_streams += doc.xref_stream(x)
+        p1_streams_str = p1_streams.decode('latin1', errors='ignore')
+        if ("0.388 0.388 0.388 RG" in p1_streams_str or "0.098 0.098 0.098 RG" in p1_streams_str or
+            re.search(r'Tf\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+RG\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+rg\s*\[<[0-9a-fA-F]+>\]TJ', p1_streams_str)):
+            has_pdflib_synthesizer = True
+
+        # 5. فحص محركات وأدوات التزوير الخارجية غير الرسمية
         detected_external_engine = None
         for eng in cls.FORGERY_EXTERNAL_ENGINES:
             if eng.encode() in raw_lower or eng in producer.lower() or eng in creator.lower():
                 detected_external_engine = eng
                 break
 
-        # 5. فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
+        # 6. فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
         has_header_duplication_bug = False
         if "Page 1 of" in p1_text:
             for line in p1_text.splitlines():
@@ -145,11 +156,11 @@ class TurnitinStrictAuditor:
                     has_header_duplication_bug = True
                     break
 
-        # 6. فحص تطابق التوقيت الزمني بالثانية مع pdf-lib
+        # 7. فحص تطابق التوقيت الزمني بالثانية مع pdf-lib
         is_pdflib = "pdf-lib" in producer.lower() or "pdf-lib" in creator.lower()
         has_exact_same_timestamp = (cdate == mdate and len(cdate) > 8 and is_pdflib)
 
-        # 7. فحص بصمة لون رقم الإرسال (#181818 الخاص بسكريبتات التزوير)
+        # 8. فحص بصمة لون رقم الإرسال (#181818 الخاص بسكريبتات التزوير)
         sub_id_is_181818 = False
         try:
             p1_json = json.loads(doc[0].get_text("json"))
@@ -162,12 +173,12 @@ class TurnitinStrictAuditor:
         except Exception:
             pass
 
-        # 8. فحص صفحة الغلاف الرسمية
+        # 9. فحص صفحة الغلاف الرسمية
         has_cover_page = ("Document Details" in p1_text or "تفاصيل المستند" in p1_text) and (
             "Submission ID" in p1_text or "معرف الإرسال" in p1_text
         )
 
-        # 9. فحص أدوات التجميع الخارجية وتفريغ الميتاداتا
+        # 10. فحص أدوات التجميع الخارجية وتفريغ الميتاداتا
         is_pypdf = "pypdf" in producer.lower() or "pypdf" in creator.lower() or b"pypdf" in raw_lower
         is_metadata_wiped = (not cdate and not mdate and is_pypdf)
         is_browser_print = "chromium" in creator.lower() or "skia" in producer.lower()
@@ -177,13 +188,15 @@ class TurnitinStrictAuditor:
         # ==========================================================
 
         # [أ] أدلة التزوير القاطع (100% FAKE)
-        if (has_whiteout or has_bundled_font or detected_fake_aliases or detected_generic_fonts or detected_counterfeit_fonts or 
+        if (has_pdflib_synthesizer or has_whiteout or has_bundled_font or detected_fake_aliases or detected_generic_fonts or detected_counterfeit_fonts or 
             detected_external_engine or has_header_duplication_bug or (has_exact_same_timestamp and sub_id_is_181818)):
             result["verdict"] = "FABRICATED_FORGERY"
             result["verdict_title"] = "مزيف ومعدل 100% (Fake / Tampered Forgery)"
             result["confidence_pct"] = 100
             result["is_clean_official"] = False
             
+            if has_pdflib_synthesizer:
+                result["flags_forgery"].append("بصمة قالب الغلاف المصطنع بـ pdf-lib (توليد النصوص بألوان 0.388/0.098 وأوامر TJ المدمجة)")
             if has_whiteout:
                 result["flags_forgery"].append("اكتشاف طبقة طمس وتبييض رقمية (White-out Overlay) لحجب وتعديل بيانات الغلاف الرسمية")
             if has_bundled_font:

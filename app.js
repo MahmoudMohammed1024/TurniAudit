@@ -71,8 +71,8 @@ async function handleFile(file) {
     const arrayBuffer = await file.arrayBuffer();
     const rawBytes = new Uint8Array(arrayBuffer);
     
-    // فحص المحتوى الثنائي الكامل بدون تقزيم العينة
-    const rawAnalysis = analyzeRawPdfBytes(rawBytes);
+    // فحص المحتوى الثنائي الكامل وفك ضغط التدفقات
+    const rawAnalysis = await analyzeRawPdfBytes(rawBytes);
 
     // فحص البنية النصية والميتاداتا عبر PDF.js
     const pdfDoc = await pdfjsLib.getDocument({ data: rawBytes }).promise;
@@ -144,7 +144,7 @@ async function handleFile(file) {
     // فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
     let hasHeaderDuplicationBug = false;
     const p1Matches = (p1Text.match(/Page 1 of/g) || []).length;
-    if (p1Matches > 1 && (isPdfLib || rawAnalysis.hasWhiteout || rawAnalysis.hasBundledFont)) {
+    if (p1Matches > 1 && (isPdfLib || rawAnalysis.hasWhiteout || rawAnalysis.hasBundledFont || rawAnalysis.hasPdflibSynthesizer)) {
       hasHeaderDuplicationBug = true;
     }
 
@@ -173,6 +173,7 @@ async function handleFile(file) {
       isSameTimestamp: isSameTimestamp,
       hasBundledFont: rawAnalysis.hasBundledFont,
       hasWhiteout: rawAnalysis.hasWhiteout,
+      hasPdflibSynthesizer: rawAnalysis.hasPdflibSynthesizer,
       submissionId: submissionId,
       reportType: reportType,
       detectedScore: detectedScore
@@ -189,12 +190,50 @@ async function handleFile(file) {
 }
 
 // -------------------------------------------------------------
-// تشريح بيانات البايت الثنائية لملف الـ PDF
+// تشريح بيانات البايت الثنائية لملف الـ PDF مع فك ضغط التدفقات
 // -------------------------------------------------------------
-function analyzeRawPdfBytes(bytes) {
-  // فحص شامل للنص الثنائي - مسح كامل محتوى الملف حتى 50 ميجابايت بدون تقزيم العينة
+async function analyzeRawPdfBytes(bytes) {
+  // فحص شامل للنص الثنائي الخام حتى 50 ميجابايت
   const scanLimit = Math.min(bytes.length, 50 * 1024 * 1024);
-  const fullSample = new TextDecoder('latin1').decode(bytes.subarray(0, scanLimit));
+  const rawText = new TextDecoder('latin1').decode(bytes.subarray(0, scanLimit));
+
+  // فك ضغط تدفقات الـ Flate Streams لكشف أوامر وألوان ومصفوفات الرسم الداخلية
+  let streamText = '';
+  try {
+    const streamMatches = [...rawText.matchAll(/stream[\r\n]+([\s\S]*?)[\r\n]+endstream/g)];
+    for (const m of streamMatches) {
+      const rawStr = m[1];
+      const u8 = new Uint8Array(rawStr.length);
+      for (let i = 0; i < rawStr.length; i++) u8[i] = rawStr.charCodeAt(i);
+      try {
+        const ds = new DecompressionStream('deflate');
+        const writer = ds.writable.getWriter();
+        writer.write(u8).catch(() => {});
+        writer.close().catch(() => {});
+        const reader = ds.readable.getReader();
+        const chunks = [];
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+        const decBuf = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const c of chunks) {
+          decBuf.set(c, offset);
+          offset += c.length;
+        }
+        streamText += new TextDecoder('latin1').decode(decBuf) + '\n';
+      } catch (e) {
+        // Stream ليس من نوع deflate
+      }
+    }
+  } catch (err) {
+    console.warn('Stream decompression fallback:', err);
+  }
+
+  const fullSample = rawText + '\n' + streamText;
 
   // استخراج Producer و Creator مع دعم الأقواس المهربة
   let producer = '';
@@ -217,6 +256,11 @@ function analyzeRawPdfBytes(bytes) {
   let title = '';
   const titleMatch = fullSample.match(/\/Title\s*\((.*?)(?<!\\)\)/s);
   if (titleMatch) title = titleMatch[1].replace(/\\([()])/g, '$1');
+
+  // فحص بصمة محرك التوليد الاصطناعي (pdf-lib drawText Synthesizer Footprint)
+  const hasPdflibSynthesizer = /0\.388\s+0\.388\s+0\.388\s+RG\s+0\.388\s+0\.388\s+0\.388\s+rg/.test(fullSample) ||
+                               /0\.098\s+0\.098\s+0\.098\s+RG\s+0\.098\s+0\.098\s+0\.098\s+rg/.test(fullSample) ||
+                               /Tf\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+RG\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+rg\s*\[<[0-9a-fA-F]+>\]TJ/.test(fullSample);
 
   // فحص حقن الخطوط الخارجية المستقلة (مثل bundled_font)
   const hasBundledFont = fullSample.includes('bundled_font');
@@ -287,7 +331,8 @@ function analyzeRawPdfBytes(bytes) {
     isBrowserPrint,
     hasXmp,
     hasBundledFont,
-    hasWhiteout
+    hasWhiteout,
+    hasPdflibSynthesizer
   };
 }
 
@@ -300,6 +345,12 @@ function evaluateForensicDecision(data) {
   const flagsAuthentic = [];
 
   // أ) فحص مؤشرات التزوير والتلاعب القاطع (100% FAKE / TAMPERED)
+  if (data.hasPdflibSynthesizer) {
+    flagsForgery.push(currentLang === 'ar'
+      ? 'بصمة قالب الغلاف المصطنع بـ pdf-lib (توليد النصوص بألوان 0.388/0.098 وأوامر TJ المدمجة)'
+      : 'Counterfeit pdf-lib cover template footprint detected (synthetic 0.388/0.098 colors and inlined TJ operators)');
+  }
+
   if (data.hasWhiteout) {
     flagsForgery.push(currentLang === 'ar'
       ? 'اكتشاف طبقة طمس وتبييض رقمية (White-out Overlay) لحجب وتعديل بيانات الغلاف الأصلية'
