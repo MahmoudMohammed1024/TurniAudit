@@ -11,3 +11,9 @@ uploads/
 # Keep sample testing PDFs out of public git for privacy
 *.pdf
 !sample.pdf
+
+# Legacy client files & virtual environments
+app.py
+turniscan_client.*
+.venv/
+venv/
