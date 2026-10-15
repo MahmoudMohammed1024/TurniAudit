@@ -140,6 +140,8 @@ async function handleFile(file) {
       hasXmp: rawAnalysis.hasXmp,
       fakeAliases: rawAnalysis.fakeAliases,
       genericFonts: rawAnalysis.genericFonts,
+      counterfeitFonts: rawAnalysis.counterfeitFonts,
+      detectedExternalEngine: rawAnalysis.detectedExternalEngine,
       hasHeaderDuplicationBug: hasHeaderDuplicationBug,
       hasCoverPage: hasCoverPage,
       hasStandardPagination: hasStandardPagination,
@@ -206,12 +208,30 @@ function analyzeRawPdfBytes(bytes) {
     }
   });
 
+  // فحص الخطوط البديلة مفتوحة المصدر (بصمة سكريبتات التزوير على لينكس/بايثون)
+  const counterfeitFonts = [];
+  ['liberation', 'dejavu', 'freesans'].forEach(f => {
+    if (fullSample.toLowerCase().includes(f)) {
+      counterfeitFonts.push(f.charAt(0).toUpperCase() + f.slice(1));
+    }
+  });
+
+  // فحص محركات التوليد والتصدير الخارجية غير المصرح بها
+  let detectedExternalEngine = null;
+  const externalEngines = ['mupdf', 'reportlab', 'weasyprint', 'wkhtmltopdf', 'fpdf', 'tcpdf', 'mpdf', 'itext', 'dompdf'];
+  for (const eng of externalEngines) {
+    if (fullSample.toLowerCase().includes(eng) || producer.toLowerCase().includes(eng) || creator.toLowerCase().includes(eng)) {
+      detectedExternalEngine = eng;
+      break;
+    }
+  }
+
   // فحص trn:oid
   let trnOid = null;
   const trnMatch = fullSample.match(/trn:oid:::[a-zA-Z0-9:]+/);
   if (trnMatch) trnOid = trnMatch[0];
 
-  const isPypdf = producer.toLowerCase().includes('pypdf') || creator.toLowerCase().includes('pypdf');
+  const isPypdf = producer.toLowerCase().includes('pypdf') || creator.toLowerCase().includes('pypdf') || fullSample.toLowerCase().includes('pypdf');
   const isPdfLib = producer.toLowerCase().includes('pdf-lib') || fullSample.includes('pdf-lib');
   const isBrowserPrint = creator.toLowerCase().includes('chromium') || producer.toLowerCase().includes('skia');
   const isSameTimestamp = (creationDate === modDate && creationDate.length > 8 && isPdfLib);
@@ -224,6 +244,8 @@ function analyzeRawPdfBytes(bytes) {
     modDate,
     fakeAliases,
     genericFonts,
+    counterfeitFonts,
+    detectedExternalEngine,
     trnOid,
     isPypdf,
     isPdfLib,
@@ -241,7 +263,19 @@ function evaluateForensicDecision(data) {
   const flagsTampered = [];
   const flagsAuthentic = [];
 
-  // أ) فحص مؤشرات التزوير القاطع
+  // أ) فحص مؤشرات التزوير القاطع (100% FAKE)
+  if (data.detectedExternalEngine) {
+    flagsForgery.push(currentLang === 'ar'
+      ? `توليد المستند بمحرك برمجي خارجي غير معتمد من Turnitin: (${data.detectedExternalEngine})`
+      : `Document generated using unauthorized external PDF engine: (${data.detectedExternalEngine})`);
+  }
+
+  if (data.counterfeitFonts && data.counterfeitFonts.length > 0) {
+    flagsForgery.push(currentLang === 'ar'
+      ? `تضمين خطوط مفتوحة المصدر تستخدمها سكريبتات التزوير الخارجية: (${data.counterfeitFonts.join(', ')})`
+      : `Counterfeit open-source fonts detected from external forgery scripts: (${data.counterfeitFonts.join(', ')})`);
+  }
+
   if (data.fakeAliases.length > 0) {
     flagsForgery.push(currentLang === 'ar' 
       ? `اكتشاف أسماء خطوط بديلة وهمية من قوالب التزوير المعروفة: (${data.fakeAliases.join(', ')})`

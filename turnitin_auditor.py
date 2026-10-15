@@ -16,6 +16,8 @@ class TurnitinStrictAuditor:
 
     FORGERY_FONT_ALIASES = {'NotoR', 'NotoSB', 'LexM', 'LexSB'}
     FORGERY_GENERIC_FONTS = {'Noto Sans Regular', 'Lexend Deca Medium', 'Noto Sans SemiBold', 'Lexend Deca SemiBold'}
+    FORGERY_COUNTERFEIT_FONTS = {'liberation', 'dejavu', 'freesans'}
+    FORGERY_EXTERNAL_ENGINES = {'mupdf', 'reportlab', 'weasyprint', 'wkhtmltopdf', 'fpdf', 'tcpdf', 'mpdf', 'itext', 'dompdf'}
 
     @classmethod
     def audit_pdf(cls, file_path: str) -> Dict[str, Any]:
@@ -91,9 +93,16 @@ class TurnitinStrictAuditor:
             if score_m:
                 result["detected_score"] = score_m.group(1)
 
+        # قراءة البايتات الخام للتحقق الثنائي
+        with open(file_path, "rb") as fp:
+            raw_bytes = fp.read()
+        raw_lower = raw_bytes.lower()
+
         # 2. فحص الخطوط والأسماء البديلة
         detected_fake_aliases = set()
         detected_generic_fonts = set()
+        detected_counterfeit_fonts = set()
+
         for p in doc:
             for f in p.get_fonts():
                 basefont, alias = f[3], f[4]
@@ -101,8 +110,28 @@ class TurnitinStrictAuditor:
                     detected_fake_aliases.add(alias)
                 if basefont in cls.FORGERY_GENERIC_FONTS:
                     detected_generic_fonts.add(basefont)
+                for cfont in cls.FORGERY_COUNTERFEIT_FONTS:
+                    if cfont in basefont.lower() or cfont in alias.lower():
+                        detected_counterfeit_fonts.add(basefont)
 
-        # 3. فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
+        # فحص البايتات المباشرة للخطوط البديلة والمفتوحة
+        for alias in cls.FORGERY_FONT_ALIASES:
+            for needle in [f"/{alias} ".encode(), f"/{alias}/".encode(), f"/{alias}\n".encode()]:
+                if needle in raw_bytes:
+                    detected_fake_aliases.add(alias)
+
+        for cfont in cls.FORGERY_COUNTERFEIT_FONTS:
+            if cfont.encode() in raw_lower:
+                detected_counterfeit_fonts.add(cfont.title())
+
+        # 3. فحص محركات وأدوات التزوير الخارجية غير الرسمية
+        detected_external_engine = None
+        for eng in cls.FORGERY_EXTERNAL_ENGINES:
+            if eng.encode() in raw_lower or eng in producer.lower() or eng in creator.lower():
+                detected_external_engine = eng
+                break
+
+        # 4. فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
         has_header_duplication_bug = False
         if "Page 1 of" in p1_text:
             for line in p1_text.splitlines():
@@ -110,11 +139,11 @@ class TurnitinStrictAuditor:
                     has_header_duplication_bug = True
                     break
 
-        # 4. فحص تطابق التوقيت الزمني بالثانية مع pdf-lib
+        # 5. فحص تطابق التوقيت الزمني بالثانية مع pdf-lib
         is_pdflib = "pdf-lib" in producer.lower() or "pdf-lib" in creator.lower()
         has_exact_same_timestamp = (cdate == mdate and len(cdate) > 8 and is_pdflib)
 
-        # 5. فحص بصمة لون رقم الإرسال (#181818 الخاص بسكريبتات التزوير)
+        # 6. فحص بصمة لون رقم الإرسال (#181818 الخاص بسكريبتات التزوير)
         sub_id_is_181818 = False
         try:
             p1_json = json.loads(doc[0].get_text("json"))
@@ -127,13 +156,13 @@ class TurnitinStrictAuditor:
         except Exception:
             pass
 
-        # 6. فحص صفحة الغلاف الرسمية
+        # 7. فحص صفحة الغلاف الرسمية
         has_cover_page = ("Document Details" in p1_text or "تفاصيل المستند" in p1_text) and (
             "Submission ID" in p1_text or "معرف الإرسال" in p1_text
         )
 
-        # 7. فحص أدوات التجميع الخارجية وتفريغ الميتاداتا
-        is_pypdf = "pypdf" in producer.lower() or "pypdf" in creator.lower()
+        # 8. فحص أدوات التجميع الخارجية وتفريغ الميتاداتا
+        is_pypdf = "pypdf" in producer.lower() or "pypdf" in creator.lower() or b"pypdf" in raw_lower
         is_metadata_wiped = (not cdate and not mdate and is_pypdf)
         is_browser_print = "chromium" in creator.lower() or "skia" in producer.lower()
 
@@ -142,12 +171,17 @@ class TurnitinStrictAuditor:
         # ==========================================================
 
         # [أ] أدلة التزوير القاطع (100% FAKE)
-        if detected_fake_aliases or detected_generic_fonts or has_header_duplication_bug or (has_exact_same_timestamp and sub_id_is_181818):
+        if (detected_fake_aliases or detected_generic_fonts or detected_counterfeit_fonts or 
+            detected_external_engine or has_header_duplication_bug or (has_exact_same_timestamp and sub_id_is_181818)):
             result["verdict"] = "FABRICATED_FORGERY"
             result["verdict_title"] = "مزيف 100% (Fake Forgery)"
             result["confidence_pct"] = 100
             result["is_clean_official"] = False
             
+            if detected_external_engine:
+                result["flags_forgery"].append(f"توليد المستند بمحرك برمجي خارجي غير معتمد من Turnitin: ({detected_external_engine})")
+            if detected_counterfeit_fonts:
+                result["flags_forgery"].append(f"تضمين خطوط مفتوحة المصدر تستخدمها سكريبتات التزوير الخارجية: {list(detected_counterfeit_fonts)}")
             if detected_fake_aliases:
                 result["flags_forgery"].append(f"استخدام أسماء خطوط بديلة خاصة بأدوات التزوير المعروفة: {list(detected_fake_aliases)}")
             if detected_generic_fonts:
@@ -157,7 +191,7 @@ class TurnitinStrictAuditor:
             if has_exact_same_timestamp and sub_id_is_181818:
                 result["flags_forgery"].append("بصمة لون النص المطبوع (#181818) مع تطابق توقيت التصدير بالثانية")
 
-            result["recommendation"] = "رفض التقرير فوراً؛ المستند مصطنع بالكامل باستخدام قوالب خارجية تحاكي Turnitin."
+            result["recommendation"] = "رفض التقرير فوراً؛ المستند مصطنع بالكامل باستخدام قوالب ومحركات خارجية تحاكي Turnitin."
 
         # [ب] أدلة التعديل والقص والدمج الخارجي (100% TAMPERED)
         elif is_pypdf or not has_cover_page or is_metadata_wiped:
