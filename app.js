@@ -71,12 +71,33 @@ async function handleFile(file) {
     const arrayBuffer = await file.arrayBuffer();
     const rawBytes = new Uint8Array(arrayBuffer);
     
-    // فحص المحتوى الثنائي الكامل
+    // فحص المحتوى الثنائي الكامل بدون تقزيم العينة
     const rawAnalysis = analyzeRawPdfBytes(rawBytes);
 
-    // فحص البنية النصية عبر PDF.js
+    // فحص البنية النصية والميتاداتا عبر PDF.js
     const pdfDoc = await pdfjsLib.getDocument({ data: rawBytes }).promise;
     const pageCount = pdfDoc.numPages;
+
+    let metaInfo = {};
+    let metaXmp = null;
+    try {
+      const meta = await pdfDoc.getMetadata();
+      if (meta) {
+        metaInfo = meta.info || {};
+        metaXmp = meta.metadata;
+      }
+    } catch (e) {
+      console.warn('PDF.js metadata extraction fallback:', e);
+    }
+
+    const producer = metaInfo.Producer || rawAnalysis.producer || '';
+    const creator = metaInfo.Creator || rawAnalysis.creator || '';
+    const cdate = metaInfo.CreationDate || rawAnalysis.creationDate || '';
+    const mdate = metaInfo.ModDate || rawAnalysis.modDate || '';
+    const title = metaInfo.Title || rawAnalysis.title || '';
+    const isPdfLib = producer.toLowerCase().includes('pdf-lib') || creator.toLowerCase().includes('pdf-lib') || rawAnalysis.isPdfLib;
+    const isPypdf = producer.toLowerCase().includes('pypdf') || creator.toLowerCase().includes('pypdf') || rawAnalysis.isPypdf;
+    const isSameTimestamp = (cdate === mdate && cdate.length > 8 && isPdfLib);
 
     let p1Text = '';
     let p2Text = '';
@@ -123,7 +144,7 @@ async function handleFile(file) {
     // فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
     let hasHeaderDuplicationBug = false;
     const p1Matches = (p1Text.match(/Page 1 of/g) || []).length;
-    if (p1Matches > 1 && rawAnalysis.isPdfLib) {
+    if (p1Matches > 1 && (isPdfLib || rawAnalysis.hasWhiteout || rawAnalysis.hasBundledFont)) {
       hasHeaderDuplicationBug = true;
     }
 
@@ -133,11 +154,12 @@ async function handleFile(file) {
     const auditResult = evaluateForensicDecision({
       filename: file.name,
       pageCount: pageCount,
-      producer: rawAnalysis.producer,
-      creator: rawAnalysis.creator,
-      cdate: rawAnalysis.creationDate,
-      mdate: rawAnalysis.modDate,
-      hasXmp: rawAnalysis.hasXmp,
+      producer: producer,
+      creator: creator,
+      title: title,
+      cdate: cdate,
+      mdate: mdate,
+      hasXmp: !!metaXmp || rawAnalysis.hasXmp,
       fakeAliases: rawAnalysis.fakeAliases,
       genericFonts: rawAnalysis.genericFonts,
       counterfeitFonts: rawAnalysis.counterfeitFonts,
@@ -145,10 +167,12 @@ async function handleFile(file) {
       hasHeaderDuplicationBug: hasHeaderDuplicationBug,
       hasCoverPage: hasCoverPage,
       hasStandardPagination: hasStandardPagination,
-      isPypdf: rawAnalysis.isPypdf,
-      isPdfLib: rawAnalysis.isPdfLib,
+      isPypdf: isPypdf,
+      isPdfLib: isPdfLib,
       isBrowserPrint: rawAnalysis.isBrowserPrint,
-      isSameTimestamp: rawAnalysis.isSameTimestamp,
+      isSameTimestamp: isSameTimestamp,
+      hasBundledFont: rawAnalysis.hasBundledFont,
+      hasWhiteout: rawAnalysis.hasWhiteout,
       submissionId: submissionId,
       reportType: reportType,
       detectedScore: detectedScore
@@ -168,21 +192,18 @@ async function handleFile(file) {
 // تشريح بيانات البايت الثنائية لملف الـ PDF
 // -------------------------------------------------------------
 function analyzeRawPdfBytes(bytes) {
-  // فحص شامل للنص الثنائي
-  const sampleLimit = Math.min(bytes.length, 500000);
-  const headStr = new TextDecoder('latin1').decode(bytes.slice(0, sampleLimit));
-  const tailStart = Math.max(0, bytes.length - sampleLimit);
-  const tailStr = new TextDecoder('latin1').decode(bytes.slice(tailStart));
-  const fullSample = headStr + '\n' + tailStr;
+  // فحص شامل للنص الثنائي - مسح كامل محتوى الملف حتى 50 ميجابايت بدون تقزيم العينة
+  const scanLimit = Math.min(bytes.length, 50 * 1024 * 1024);
+  const fullSample = new TextDecoder('latin1').decode(bytes.subarray(0, scanLimit));
 
-  // استخراج Producer و Creator
+  // استخراج Producer و Creator مع دعم الأقواس المهربة
   let producer = '';
-  const prodMatch = fullSample.match(/\/Producer\s*\(([^)]+)\)/);
-  if (prodMatch) producer = prodMatch[1];
+  const prodMatch = fullSample.match(/\/Producer\s*\((.*?)(?<!\\)\)/s);
+  if (prodMatch) producer = prodMatch[1].replace(/\\([()])/g, '$1');
 
   let creator = '';
-  const creatMatch = fullSample.match(/\/Creator\s*\(([^)]+)\)/);
-  if (creatMatch) creator = creatMatch[1];
+  const creatMatch = fullSample.match(/\/Creator\s*\((.*?)(?<!\\)\)/s);
+  if (creatMatch) creator = creatMatch[1].replace(/\\([()])/g, '$1');
 
   // استخراج تواريخ الميتاداتا
   let creationDate = '';
@@ -193,6 +214,13 @@ function analyzeRawPdfBytes(bytes) {
   const mMatch = fullSample.match(/\/ModDate\s*\(([^)]+)\)/);
   if (mMatch) modDate = mMatch[1];
 
+  let title = '';
+  const titleMatch = fullSample.match(/\/Title\s*\((.*?)(?<!\\)\)/s);
+  if (titleMatch) title = titleMatch[1].replace(/\\([()])/g, '$1');
+
+  // فحص حقن الخطوط الخارجية المستقلة (مثل bundled_font)
+  const hasBundledFont = fullSample.includes('bundled_font');
+
   // فحص أسماء الخطوط الوهمية المستخدمة في التزوير
   const fakeAliases = [];
   ['NotoR', 'NotoSB', 'LexM', 'LexSB'].forEach(alias => {
@@ -201,9 +229,11 @@ function analyzeRawPdfBytes(bytes) {
     }
   });
 
+  // فحص الخطوط العامة غير المجزأة (مع دعم ترميز المسافات #20 في الـ PDF)
   const genericFonts = [];
   ['Noto Sans Regular', 'Lexend Deca Medium', 'Noto Sans SemiBold', 'Lexend Deca SemiBold'].forEach(f => {
-    if (fullSample.includes(f)) {
+    const fHash = f.replace(/ /g, '#20');
+    if (fullSample.includes(f) || fullSample.includes(fHash)) {
       genericFonts.push(f);
     }
   });
@@ -215,6 +245,11 @@ function analyzeRawPdfBytes(bytes) {
       counterfeitFonts.push(f.charAt(0).toUpperCase() + f.slice(1));
     }
   });
+
+  // فحص كائنات ومستطيلات الطمس والتبييض (White-out Rectangles)
+  const hasWhiteout = /re\s*(?:h\s*)?1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[BfbF]/.test(fullSample) ||
+                      /1\s+1\s+1\s+rg[\s\S]{1,60}?re\s*(?:h\s*)?[BfbF]/.test(fullSample) ||
+                      /1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[\d\.\s]+re\s*[BfbF]/.test(fullSample);
 
   // فحص محركات التوليد والتصدير الخارجية غير المصرح بها
   let detectedExternalEngine = null;
@@ -232,14 +267,14 @@ function analyzeRawPdfBytes(bytes) {
   if (trnMatch) trnOid = trnMatch[0];
 
   const isPypdf = producer.toLowerCase().includes('pypdf') || creator.toLowerCase().includes('pypdf') || fullSample.toLowerCase().includes('pypdf');
-  const isPdfLib = producer.toLowerCase().includes('pdf-lib') || fullSample.includes('pdf-lib');
+  const isPdfLib = producer.toLowerCase().includes('pdf-lib') || creator.toLowerCase().includes('pdf-lib') || fullSample.includes('pdf-lib');
   const isBrowserPrint = creator.toLowerCase().includes('chromium') || producer.toLowerCase().includes('skia');
-  const isSameTimestamp = (creationDate === modDate && creationDate.length > 8 && isPdfLib);
   const hasXmp = fullSample.includes('<?xpacket') || fullSample.includes('<x:xmpmeta');
 
   return {
     producer,
     creator,
+    title,
     creationDate,
     modDate,
     fakeAliases,
@@ -250,8 +285,9 @@ function analyzeRawPdfBytes(bytes) {
     isPypdf,
     isPdfLib,
     isBrowserPrint,
-    isSameTimestamp,
-    hasXmp
+    hasXmp,
+    hasBundledFont,
+    hasWhiteout
   };
 }
 
@@ -263,7 +299,19 @@ function evaluateForensicDecision(data) {
   const flagsTampered = [];
   const flagsAuthentic = [];
 
-  // أ) فحص مؤشرات التزوير القاطع (100% FAKE)
+  // أ) فحص مؤشرات التزوير والتلاعب القاطع (100% FAKE / TAMPERED)
+  if (data.hasWhiteout) {
+    flagsForgery.push(currentLang === 'ar'
+      ? 'اكتشاف طبقة طمس وتبييض رقمية (White-out Overlay) لحجب وتعديل بيانات الغلاف الأصلية'
+      : 'Digital white-out overlay detected concealing and patching official cover details');
+  }
+
+  if (data.hasBundledFont) {
+    flagsForgery.push(currentLang === 'ar'
+      ? 'حقن كائن خط خارجي غير معتمد (bundled_font) لتزوير اسم الملف وبيانات التقرير'
+      : 'Counterfeit bundled font injection detected (bundled_font) used to stamp fake details');
+  }
+
   if (data.detectedExternalEngine) {
     flagsForgery.push(currentLang === 'ar'
       ? `توليد المستند بمحرك برمجي خارجي غير معتمد من Turnitin: (${data.detectedExternalEngine})`
