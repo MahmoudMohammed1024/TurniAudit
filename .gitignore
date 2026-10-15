@@ -8,9 +8,8 @@ __pycache__/
 *.log
 uploads/
 
-# Keep sample testing PDFs out of public git for privacy
+# Strict privacy: Ignore all PDFs, DOCX, and student data
 *.pdf
-!sample.pdf
 
 # Legacy client files & virtual environments
 app.py
