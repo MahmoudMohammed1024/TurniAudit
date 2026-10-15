@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>فاحص Turnitin الجنائي الصارم | Turnitin Forensic Auditor</title>
+  <meta name="description" content="أداة الفحص الجنائي الرقمي الصارم لتقارير Turnitin لكشف التزوير والقص والدمج بنسبة 100% مع ضمان عدم ظلم أي تقرير أصلي.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- PDF.js CDN for client-side rendering & parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</head>
+<body>
+  <!-- Background Glow & Grid -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+  <div class="bg-grid"></div>
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">TurniAudit Forensic</h1>
+          <span class="brand-tag">نظام العدالة الجنائية الرقمية v2.0</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="badge badge-pulse">🔒 فحص آمن 100% داخل المتصفح</span>
+        <button id="langToggle" class="btn btn-outline" title="Switch Language">English</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="hero-badge">
+        <span class="dot"></span> فحص صارم وموثوق • Zero False Positives • لا يظلم أحداً نهائياً
+      </div>
+      <h2 class="hero-title">
+        كشف تزوير وتلاعب تقارير <span class="gradient-text">Turnitin</span>
+      </h2>
+      <p class="hero-desc">
+        تحليل جنائي متعمق لتقارير الذكاء الاصطناعي (AI Reports) ونسب الاقتباس (Similarity Reports) لكشف قوالب التزوير المصطنعة، وقص الأغلفة، والدمج الخارجي بـ <code>pypdf</code>، مع التمييز المنصف للتقارير الرسمية الحديثة.
+      </p>
+    </section>
+
+    <!-- Upload Dropzone -->
+    <section class="upload-section">
+      <div id="dropZone" class="drop-zone">
+        <input type="file" id="fileInput" accept=".pdf" class="file-input">
+        <div class="drop-icon-wrapper">
+          <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+        </div>
+        <h3 class="drop-title">اسحب وأفلت تقرير الـ PDF هنا</h3>
+        <p class="drop-subtitle">أو انقر لاختيار الملف من جهازك (يدعم جميع تقارير Turnitin العربية والإنجليزية)</p>
+        <button type="button" class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          اختيار ملف PDF
+        </button>
+        <div class="drop-privacy-note">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          خصوصية تامة: يتم الفحص بالكامل محلياً على جهازك، لا يتم إرسال ملفك لأي خادم خارجي.
+        </div>
+      </div>
+
+      <!-- Demo Samples Buttons -->
+      <div class="demo-samples">
+        <span class="demo-label">أو جرّب نماذج فورية جاهزة:</span>
+        <button id="btnSampleReal" class="btn btn-demo btn-demo-real">
+          <span class="status-circle status-green"></span> نموذج تقرير أصلي معتمد
+        </button>
+        <button id="btnSampleFake" class="btn btn-demo btn-demo-fake">
+          <span class="status-circle status-red"></span> نموذج تقرير مزور بالكامل
+        </button>
+        <button id="btnSampleTampered" class="btn btn-demo btn-demo-tampered">
+          <span class="status-circle status-orange"></span> نموذج تقرير مقصوص الغلاف (pypdf)
+        </button>
+      </div>
+    </section>
+
+    <!-- Loading Spinner -->
+    <div id="loadingIndicator" class="loading-container hidden">
+      <div class="scanner-line"></div>
+      <div class="spinner"></div>
+      <p id="loadingStatusText" class="loading-text">جاري تشريح بنية الـ PDF وفحص الميتاداتا والخطوط...</p>
+    </div>
+
+    <!-- Results Container -->
+    <section id="resultsSection" class="results-section hidden">
+      <!-- Verdict Card -->
+      <div id="verdictCard" class="verdict-card">
+        <div class="verdict-header">
+          <div id="verdictIcon" class="verdict-icon"></div>
+          <div class="verdict-title-box">
+            <span id="verdictBadge" class="verdict-badge"></span>
+            <h3 id="verdictTitle" class="verdict-main-title"></h3>
+            <p id="verdictSubtitle" class="verdict-subtitle"></p>
+          </div>
+          <div class="confidence-box">
+            <span class="confidence-title">نسبة التأكد الجنائي</span>
+            <div id="confidenceVal" class="confidence-val">--%</div>
+            <div class="confidence-bar-bg">
+              <div id="confidenceBar" class="confidence-bar"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="recommendationBox" class="recommendation-box">
+          <div class="rec-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            التوجيه الأكاديمي والقرار العادل:
+          </div>
+          <p id="recommendationText" class="rec-text"></p>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Grid -->
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-label">نوع التقرير</span>
+          <span id="metricReportType" class="metric-value">--</span>
+          <span class="metric-sub" id="metricScoreSub">النسبة: <strong id="metricScoreVal" class="text-highlight">--</strong></span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">معرف الإرسال (Submission ID)</span>
+          <span id="metricSubmissionId" class="metric-value font-mono">--</span>
+          <span class="metric-sub" id="metricSubmissionSub">معتمد في خوادم Turnitin</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">صفحة الغلاف الرسمية</span>
+          <span id="metricCoverStatus" class="metric-value">--</span>
+          <span class="metric-sub" id="metricCoverSub">توثيق بيانات المؤسسة والمدرس</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">محرك التصدير (Producer)</span>
+          <span id="metricProducer" class="metric-value font-mono">--</span>
+          <span class="metric-sub" id="metricProducerSub">أداة الحفظ وإنشاء الـ PDF</span>
+        </div>
+      </div>
+
+      <!-- Evidence & Analysis Details -->
+      <div class="details-grid">
+        <!-- Evidence Flags Card -->
+        <div class="card evidence-card">
+          <div class="card-header">
+            <h4>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              الأدلة والبصمات الجنائية المكتشفة
+            </h4>
+            <span id="evidenceCountBadge" class="badge">0 دليل</span>
+          </div>
+          <div id="evidenceList" class="evidence-list">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+
+        <!-- Technical Metadata Card -->
+        <div class="card metadata-card">
+          <div class="card-header">
+            <h4>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              سجل الميتاداتا وبنية الملف (PDF Internal Tree)
+            </h4>
+          </div>
+          <table class="meta-table">
+            <tbody>
+              <tr>
+                <td class="meta-name">اسم الملف</td>
+                <td id="metaFilename" class="meta-val font-mono">--</td>
+              </tr>
+              <tr>
+                <td class="meta-name">إجمالي الصفحات</td>
+                <td id="metaPageCount" class="meta-val">--</td>
+              </tr>
+              <tr>
+                <td class="meta-name">منشئ المستند (Creator)</td>
+                <td id="metaCreator" class="meta-val font-mono">--</td>
+              </tr>
+              <tr>
+                <td class="meta-name">تاريخ الإنشاء (CreationDate)</td>
+                <td id="metaCreationDate" class="meta-val font-mono">--</td>
+              </tr>
+              <tr>
+                <td class="meta-name">تاريخ التعديل (ModDate)</td>
+                <td id="metaModDate" class="meta-val font-mono">--</td>
+              </tr>
+              <tr>
+                <td class="meta-name">إصدار الـ PDF</td>
+                <td id="metaPdfVersion" class="meta-val font-mono">--</td>
+              </tr>
+              <tr>
+                <td class="meta-name">شجرة XMP Metadata</td>
+                <td id="metaXmpStatus" class="meta-val">--</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="result-actions">
+        <button id="btnReset" class="btn btn-outline" onclick="resetAuditor()">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          فحص ملف آخر
+        </button>
+        <button id="btnPrint" class="btn btn-primary" onclick="window.print()">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          طباعة / تصدير التقرير الجنائي
+        </button>
+      </div>
+    </section>
+
+    <!-- How it works / Educational section -->
+    <section class="info-section">
+      <h3 class="info-title">كيف يعمل نظام العدالة الجنائية الرقمية؟</h3>
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="info-icon info-green">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <h4>الإنصاف للتقارير الرسمية</h4>
+          <p>يدعم المحرك تقنية تصدير Turnitin الحديثة عبر المتصفح (<code>pdf-lib</code>) ويتحقق من التسلسل الزمني ووجود الغلاف الرسمي لمنع اتهام التقارير الرسمية بالخطأ.</p>
+        </div>
+        <div class="info-card">
+          <div class="info-icon info-red">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          </div>
+          <h4>كشف قوالب التزوير الصريحة</h4>
+          <p>يكشف تلقائياً أسماء الخطوط البديلة الوهمية (<code>NotoR</code>, <code>LexSB</code>) والترويسات المكررة وخلل التطابق الزمني بالثانية المستخدمة في التزوير.</p>
+        </div>
+        <div class="info-card">
+          <div class="info-icon info-orange">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          </div>
+          <h4>كشف القص والتعديل الخارجي</h4>
+          <p>يفرز بإنصاف الملفات التي فُحصت بالفعل في السيرفر لكن تم قص صفحة غلافها عمداً أو دمجها بأداة خارجية (<code>pypdf</code>) لإخفاء هوية الحساب.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <p>© 2026 TurniAudit Forensic Engine • مفتوح المصدر ومبني على مبادئ العدالة الرقمية الأكاديمية.</p>
+      <div class="footer-links">
+        <a href="https://github.com" target="_blank" rel="noopener">GitHub Repository</a>
+        <span>•</span>
+        <a href="#dropZone">فحص ملف جديد</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

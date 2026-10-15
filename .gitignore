@@ -1,0 +1,13 @@
+# Ignore private test files and student papers
+*.docx
+test/
+test2/
+scratch/
+__pycache__/
+*.json
+*.log
+uploads/
+
+# Keep sample testing PDFs out of public git for privacy
+*.pdf
+!sample.pdf
