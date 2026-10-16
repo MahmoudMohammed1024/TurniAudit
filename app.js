@@ -503,19 +503,19 @@ function evaluateForensicDecision(data) {
   // ب) فحص مؤشرات التعديل والقص والدمج الخارجي
   if (data.isPypdf) {
     flagsTampered.push(currentLang === 'ar'
-      ? 'تم حفظ وإعادة تصدير المستند بمكتبة بايثون (pypdf) خارج خوادم Turnitin'
+      ? 'تم حفظ وإعادة تصدير المستند بمكتبة بايثون الخارجية pypdf خارج خوادم Turnitin'
       : 'Document was re-saved and merged using external Python pypdf library');
   }
 
   if (!data.hasCoverPage) {
     flagsTampered.push(currentLang === 'ar'
-      ? 'حذف صفحة الغلاف الإلزامية (Cover Page) التي توثق بيانات الجامعة والمدرس وتاريخ الفحص'
+      ? 'حذف صفحة الغلاف الإلزامية التي توثق بيانات الجامعة والمدرس وتاريخ الفحص'
       : 'Mandatory Cover Page (Document Details & Institution info) is completely stripped/missing');
   }
 
   if (!data.cdate && !data.mdate && data.isPypdf) {
     flagsTampered.push(currentLang === 'ar'
-      ? 'طمس تواريخ الميتاداتا الأصلية بالكامل (CreationDate & ModDate)'
+      ? 'طمس تواريخ الميتاداتا الأصلية بالكامل'
       : 'Original metadata timestamps were completely sanitized and wiped');
   }
 
@@ -531,7 +531,7 @@ function evaluateForensicDecision(data) {
   if (flagsForgery.length > 0) {
     verdict = 'FABRICATED_FORGERY';
     verdictClass = 'verdict-forgery';
-    verdictTitle = currentLang === 'ar' ? 'مزيف 100% (Fake Forgery 100%)' : 'Fabricated Forgery (100% Fake)';
+    verdictTitle = currentLang === 'ar' ? 'مزيف ومصطنع 100%' : 'Fabricated Forgery (100% Fake)';
     verdictSubtitle = currentLang === 'ar' ? 'تم تصنيع وتوليد هذا التقرير بقوالب خارجية مصطنعة تحاكي Turnitin' : 'Generated using counterfeit templates mimicking Turnitin';
     confidence = 100;
     recommendation = currentLang === 'ar'
@@ -542,7 +542,7 @@ function evaluateForensicDecision(data) {
   else if (flagsTampered.length > 0) {
     verdict = 'TAMPERED_OR_INCOMPLETE';
     verdictClass = 'verdict-tampered';
-    verdictTitle = currentLang === 'ar' ? 'معدل ومقصوص 100% (Tampered / Spliced 100%)' : 'Tampered / Spliced Document (100%)';
+    verdictTitle = currentLang === 'ar' ? 'معدل ومقصوص 100%' : 'Tampered / Spliced Document (100%)';
     verdictSubtitle = currentLang === 'ar' ? 'تم فحص البحث ولكن تم قص صفحة الغلاف الرسمية أو إعادة حفظه بأداة خارجية' : 'Authentic scan occurred, but Cover Page was stripped and re-saved via pypdf';
     confidence = 100;
     recommendation = currentLang === 'ar'
@@ -553,7 +553,7 @@ function evaluateForensicDecision(data) {
   else {
     verdict = 'AUTHENTIC_OFFICIAL';
     verdictClass = 'verdict-authentic';
-    verdictTitle = currentLang === 'ar' ? 'أصلي معتمد 100% (Authentic Official 100%)' : 'Authentic Official Report (100% Genuine)';
+    verdictTitle = currentLang === 'ar' ? 'أصلي ومعتمد 100%' : 'Authentic Official Report (100% Genuine)';
     confidence = 100;
 
     if (data.isClassicReceipt || data.isClassicReport) {
@@ -949,11 +949,11 @@ function generateCertificateDom(res) {
           <td class="cert-td-value" style="font-weight: 800; color: #0284c7;">${res.detectedScore || (currentLang === 'ar' ? 'غير متوفر' : 'N/A')}</td>
         </tr>
         <tr>
-          <td class="cert-td-label">${currentLang === 'ar' ? 'معرف الإرسال (Submission ID)' : 'Submission ID'}</td>
+          <td class="cert-td-label">${currentLang === 'ar' ? 'معرف الإرسال' : 'Submission ID'}</td>
           <td class="cert-td-value" style="font-family: var(--font-mono);">${res.submissionId || (currentLang === 'ar' ? 'غير مسجل' : 'Not Found')}</td>
-          <td class="cert-td-label">${currentLang === 'ar' ? 'صفحة الغلاف الرسمية' : 'Cover Page Status'}</td>
+          <td class="cert-td-label">${currentLang === 'ar' ? 'صفحة الغلاف' : 'Cover Page Status'}</td>
           <td class="cert-td-value" style="font-weight: 700; color: ${res.hasCoverPage ? '#16a34a' : '#dc2626'};">
-            ${res.hasCoverPage ? (currentLang === 'ar' ? 'موجودة ونظامية ✅' : 'Valid & Present ✅') : (currentLang === 'ar' ? 'محذوفة / مقصوصة ❌' : 'Missing / Stripped ❌')}
+            ${res.hasCoverPage ? (currentLang === 'ar' ? 'موجودة ونظامية ✅' : 'Valid & Present ✅') : (currentLang === 'ar' ? 'محذوفة ومقصوصة ❌' : 'Missing / Stripped ❌')}
           </td>
         </tr>
       </table>
@@ -970,19 +970,19 @@ function generateCertificateDom(res) {
       <!-- Technical Metadata Tree Table -->
       <div class="cert-section-heading">
         <span>⚙️</span>
-        <span>${currentLang === 'ar' ? 'سجل البنية الرقمية للملف (Technical Metadata Tree)' : 'Technical PDF Metadata Tree'}</span>
+        <span>${currentLang === 'ar' ? 'سجل البنية الرقمية وميتاداتا الملف' : 'Technical PDF Metadata Tree'}</span>
       </div>
       <table class="cert-grid-table">
         <tr>
-          <td class="cert-td-label">${currentLang === 'ar' ? 'محرك التصدير (Producer)' : 'PDF Producer'}</td>
+          <td class="cert-td-label">${currentLang === 'ar' ? 'محرك التصدير' : 'PDF Producer'}</td>
           <td class="cert-td-value" style="font-family: var(--font-mono);">${res.producer || (currentLang === 'ar' ? 'ممسوح (فارغ)' : 'Empty / Stripped')}</td>
-          <td class="cert-td-label">${currentLang === 'ar' ? 'منشئ المستند (Creator)' : 'PDF Creator'}</td>
+          <td class="cert-td-label">${currentLang === 'ar' ? 'منشئ المستند' : 'PDF Creator'}</td>
           <td class="cert-td-value" style="font-family: var(--font-mono);">${res.creator || (currentLang === 'ar' ? 'فارغ' : 'Empty')}</td>
         </tr>
         <tr>
-          <td class="cert-td-label">${currentLang === 'ar' ? 'تاريخ الإنشاء (CreationDate)' : 'CreationDate'}</td>
+          <td class="cert-td-label">${currentLang === 'ar' ? 'تاريخ الإنشاء' : 'CreationDate'}</td>
           <td class="cert-td-value" style="font-family: var(--font-mono);">${res.cdate || 'None'}</td>
-          <td class="cert-td-label">${currentLang === 'ar' ? 'تاريخ التعديل (ModDate)' : 'ModDate'}</td>
+          <td class="cert-td-label">${currentLang === 'ar' ? 'تاريخ التعديل' : 'ModDate'}</td>
           <td class="cert-td-value" style="font-family: var(--font-mono);">${res.mdate || 'None'}</td>
         </tr>
         <tr>
@@ -1003,7 +1003,7 @@ function generateCertificateDom(res) {
         </div>
         <div class="cert-stamp">
           <span>TURNIAUDIT</span>
-          <span style="font-size: 0.85rem; font-weight: 900;">VERIFIED</span>
+          <span style="font-size: 0.75rem; font-weight: 900;">VERIFIED</span>
           <span>FORENSIC LAB</span>
           <span>2026</span>
         </div>
@@ -1031,6 +1031,24 @@ async function downloadForensicPdf() {
   // Make sure certificate DOM is ready
   generateCertificateDom(window.currentAuditResult);
   const element = document.getElementById('forensicCertCard');
+  const wrapper = document.getElementById('pdfExportWrapper');
+
+  if (!element || !wrapper) {
+    alert(currentLang === 'ar' ? 'حدث خطأ أثناء تجهيز وثيقة التقرير.' : 'Failed to generate certificate.');
+    btn.classList.remove('loading');
+    btnText.textContent = originalText;
+    return;
+  }
+
+  // Ensure element is visible and properly laid out for html2canvas
+  wrapper.style.position = 'fixed';
+  wrapper.style.top = '0';
+  wrapper.style.left = '0';
+  wrapper.style.width = '794px';
+  wrapper.style.zIndex = '-9999';
+  wrapper.style.opacity = '1';
+  wrapper.style.visibility = 'visible';
+  wrapper.style.display = 'block';
 
   const cleanName = (window.currentAuditResult.filename || 'report')
     .replace(/[\/\\?%*:|"<>]/g, '_')
@@ -1040,10 +1058,17 @@ async function downloadForensicPdf() {
 
   if (typeof html2pdf !== 'undefined') {
     const opt = {
-      margin: [8, 8, 8, 8],
+      margin: 0,
       filename: filename,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true, logging: false },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: document.documentElement.offsetWidth || 1366
+      },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 
