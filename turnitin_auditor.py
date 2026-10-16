@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import json
+import unicodedata
 import pymupdf
 from typing import Dict, Any, List
 
@@ -71,27 +72,102 @@ class TurnitinStrictAuditor:
             "has_xmp": bool(doc.get_xml_metadata())
         }
 
+        # دالة تنظيف وتطبيع النصوص العربية الجنائية
+        def clean_arabic_forensic(text: str) -> str:
+            if not text:
+                return ""
+            t = unicodedata.normalize('NFKC', text)
+            t = re.sub(r'[\u064B-\u065F\u0670\u0640]', '', t)
+            t = re.sub(r'\s+', ' ', t)
+            return t
+
         # 1. استخراج النصوص
         p1_text = doc[0].get_text() if page_count > 0 else ""
         p2_text = doc[1].get_text() if page_count > 1 else ""
         full_overview_text = p1_text + "\n" + p2_text
 
-        # رقم الإرسال
-        trn_match = re.search(r'trn:oid:::[a-zA-Z0-9:]+', full_overview_text)
+        # استخراج نصوص الصفحات الأخيرة (حيث يوجد تقرير الأصالة في النظام الكلاسيكي)
+        last_pages_text = ""
+        if page_count > 0:
+            last_pages_text += doc[-1].get_text() + "\n"
+        if page_count > 1:
+            last_pages_text += doc[-2].get_text() + "\n"
+        if page_count > 2:
+            last_pages_text += doc[-3].get_text() + "\n"
+
+        # تطبيع وتنظيف النصوص جنائياً
+        clean_p1 = clean_arabic_forensic(p1_text)
+        clean_p2 = clean_arabic_forensic(p2_text)
+        clean_full = clean_arabic_forensic(full_overview_text)
+        clean_last = clean_arabic_forensic(last_pages_text)
+
+        # فحص إيصال الاستلام الرقمي الكلاسيكي (Classic Digital Receipt on Page 1)
+        is_classic_receipt_en = (("submission date" in clean_p1.lower()) and ("submission id" in clean_p1.lower()))
+        is_classic_receipt_ar = bool(
+            (re.search(r'(?:تاريخ|يخرتا)\s*(?:ال[إا]?رسال|لسارلاا)', clean_p1) or re.search(r'(?:ال[إا]?رسال|لسارلاا)\s*(?:تاريخ|يخرتا)', clean_p1) or ('لسارلاا' in clean_p1 and 'يخرتا' in clean_p1)) and
+            (re.search(r'(?:معرف|فمعر)\s*(?:ال[إا]?رسال|لسارلاا)', clean_p1) or re.search(r'(?:ال[إا]?رسال|لسارلاا)\s*(?:معرف|فمعر)', clean_p1) or re.search(r'\d{8,12}\s*:\s*(?:لسارلاا|ال[إا]?رسال)', clean_p1) or ('لسارلاا' in clean_p1 and 'فمعر' in clean_p1))
+        ) or ('لسارلاا' in clean_p1 and 'فمعر' in clean_p1) or bool(re.search(r'\d{8,12}\s*:\s*لسارلاا', clean_p1))
+        is_classic_receipt = is_classic_receipt_en or is_classic_receipt_ar
+
+        # فحص تقرير الأصالة الكلاسيكي في نهاية المستند (Classic Originality Report on Last Pages)
+        is_classic_report_en = any(k in clean_last.lower() for k in ["originality report", "similarity index", "primary sources"])
+        is_classic_report_ar = bool(
+            re.search(r'(?:التشابه|هباشتلا)\s*(?:مؤشر|رشم|رشوءم)', clean_last) or
+            re.search(r'(?:مؤشر|رشم|رشوءم)\s*(?:التشابه|هباشتلا)', clean_last) or
+            re.search(r'(?:ال[أا]صالة|هلاصلاا)\s*(?:تقرير|ريرقت)', clean_last) or
+            re.search(r'(?:المصادر|رداصملا)\s*(?:الرئيسية|هيسيئرلا)', clean_last) or
+            re.search(r'(?:الرئيسية|هيسيئرلا)\s*(?:المصادر|رداصملا)', clean_last) or
+            'التشابه مؤشر' in clean_last or 'تقرير الاصالة' in clean_last
+        )
+        is_classic_grademark = "grademark" in clean_last.lower() or "grademark" in clean_p1.lower()
+        is_classic_report = is_classic_report_en or is_classic_report_ar or is_classic_grademark
+
+        # رقم الإرسال (دعم trn:oid الحديث والمعرف الرقمي الكلاسيكي)
+        trn_match = re.search(r'trn:oid:::[a-zA-Z0-9:]+', clean_full)
         if trn_match:
             result["submission_id"] = trn_match.group(0)
+        else:
+            # استخراج المعرف الرقمي الكلاسيكي
+            m_num = re.search(r'Submission ID:\s*(\d+)', clean_p1, re.IGNORECASE)
+            if m_num:
+                result["submission_id"] = m_num.group(1)
+            else:
+                m_ar = re.search(r'(\d{8,12})\s*:\s*(?:ال[إا]?رسال|لسارلاا)\s*(?:معرف|فمعر)', clean_p1) or \
+                       re.search(r'(\d{8,12})\s*:\s*(?:لسارلاا|ال[إا]?رسال)', clean_p1) or \
+                       re.search(r'(?:معرف|فمعر)\s*(?:ال[إا]?رسال|لسارلاا)?\s*:\s*(\d{8,12})', clean_p1) or \
+                       re.search(r'(\d{8,12})\s*:\s*لسارلاا\s*فمعر', clean_p1) or \
+                       re.search(r'(\d{8,12})', clean_p1)
+                if m_ar:
+                    result["submission_id"] = m_ar.group(1)
 
-        # استخراج النسبة ونوع التقرير
-        if "detected as AI" in full_overview_text or "تم إنشاؤه بالذكاء" in full_overview_text:
+        # استخراج النسبة ونوع التقرير (النظام الحديث والكلاسيكي)
+        if "detected as AI" in clean_full or "تم إنشاؤه بالذكاء" in clean_full:
             result["report_type"] = "Turnitin AI Writing Report"
-            score_m = re.search(r'(\d+%|\*%)\s*(detected as AI|من المحتوى تم إنشاؤه)', full_overview_text)
+            score_m = re.search(r'(\d+%|\*%)\s*(detected as AI|من المحتوى تم إنشاؤه)', clean_full)
             if score_m:
                 result["detected_score"] = score_m.group(1)
-        elif "Overall Similarity" in full_overview_text or "التشابه الكلي" in full_overview_text or "Match Groups" in full_overview_text:
-            result["report_type"] = "Turnitin Similarity Report"
-            score_m = re.search(r'(\d+%)\s*(Overall Similarity|التشابه)', full_overview_text)
+        elif "Overall Similarity" in clean_full or "التشابه الكلي" in clean_full or "Match Groups" in clean_full:
+            result["report_type"] = "Turnitin Modern Similarity Report"
+            score_m = re.search(r'(\d+%)\s*(Overall Similarity|التشابه)', clean_full)
             if score_m:
                 result["detected_score"] = score_m.group(1)
+        elif is_classic_report_en:
+            result["report_type"] = "Turnitin Classic Similarity Report (Feedback Studio)"
+            score_m = re.search(r'(\d+%)\s*SIMILARITY INDEX', clean_last, re.IGNORECASE) or \
+                      re.search(r'SIMILARITY INDEX\s*(\d+%)', clean_last, re.IGNORECASE)
+            if score_m:
+                result["detected_score"] = score_m.group(1)
+        elif is_classic_report_ar:
+            result["report_type"] = "Turnitin Classic Similarity Report (Arabic - Feedback Studio)"
+            score_m = re.search(r'(\d+%)\s*(?:التشابه\s*مؤشر|مؤشر\s*التشابه)', clean_last) or \
+                      re.search(r'(?:التشابه\s*مؤشر|مؤشر\s*التشابه)\s*(\d+%)', clean_last) or \
+                      re.search(r'(\d+%)\s*(?:هباشتلا\s*رشم|رشم\s*هباشتلا)', clean_last) or \
+                      re.search(r'(\d+%)\s*(?:الانترنت\s*مصادر|مصادر\s*الانترنت)', clean_last) or \
+                      re.search(r'^(\d+%)', clean_last)
+            if score_m:
+                result["detected_score"] = score_m.group(1)
+        elif is_classic_grademark:
+            result["report_type"] = "Turnitin Classic GradeMark Report (Feedback Studio)"
 
         # قراءة البايتات الخام للتحقق الثنائي
         with open(file_path, "rb") as fp:
@@ -173,10 +249,11 @@ class TurnitinStrictAuditor:
         except Exception:
             pass
 
-        # 9. فحص صفحة الغلاف الرسمية
-        has_cover_page = ("Document Details" in p1_text or "تفاصيل المستند" in p1_text) and (
-            "Submission ID" in p1_text or "معرف الإرسال" in p1_text
-        )
+        # 9. فحص صفحة الغلاف الرسمية (الحديثة أو إيصال الاستلام الرقمي الكلاسيكي)
+        is_modern_cover = (("Document Details" in p1_text or "تفاصيل المستند" in p1_text) and (
+            "Submission ID" in p1_text or "معرف الإرسال" in p1_text or "trn:oid" in p1_text
+        )) or ("Page 1 of" in p1_text and "Cover Page" in p1_text)
+        has_cover_page = is_modern_cover or is_classic_receipt
 
         # 10. فحص أدوات التجميع الخارجية وتفريغ الميتاداتا
         is_pypdf = "pypdf" in producer.lower() or "pypdf" in creator.lower() or b"pypdf" in raw_lower
@@ -242,11 +319,19 @@ class TurnitinStrictAuditor:
             result["confidence_pct"] = 100
             result["is_clean_official"] = True
 
-            result["flags_authentic"].append("مطابق 100% لمعايير تصدير Turnitin الرسمية المعتمدة")
-            result["flags_authentic"].append("صفحة الغلاف والترويسات الرسمية سليمة ومتكاملة")
-            result["flags_authentic"].append("خلو تام من أي خطوط وهمية أو قوالب مصطنعة أو أدوات دمج خارجية")
-
-            result["recommendation"] = "التقرير سليم وقانوني ومطابق 100% لمعايير التصدير الرسمية لمنصة Turnitin."
+            if is_classic_receipt or is_classic_report:
+                result["flags_authentic"].append("تقرير أصلي معتمد صادر من خادم Turnitin Feedback Studio (النظام الكلاسيكي - محرك Skia/PDF الرسمي)")
+                if is_classic_receipt:
+                    result["flags_authentic"].append("إيصال الاستلام الرقمي الرسمي (Digital Receipt) موثق ومعتمد على الصفحة الأولى")
+                if is_classic_report:
+                    result["flags_authentic"].append("تقرير الأصالة والمصادر الرئيسية (Originality Report) مدمج نظامياً بنهاية المستند")
+                result["flags_authentic"].append("سلامة تامة لبيانات الخطوط والترميز وخلو كامل من أدوات التزوير الخارجية")
+                result["recommendation"] = "التقرير سليم وقانوني ومطابق 100% لمعايير التصدير الرسمية لمنصة Turnitin Feedback Studio (النظام الكلاسيكي المعتمد)."
+            else:
+                result["flags_authentic"].append("مطابق 100% لمعايير تصدير Turnitin الرسمية المعتمدة")
+                result["flags_authentic"].append("صفحة الغلاف والترويسات الرسمية سليمة ومتكاملة")
+                result["flags_authentic"].append("خلو تام من أي خطوط وهمية أو قوالب مصطنعة أو أدوات دمج خارجية")
+                result["recommendation"] = "التقرير سليم وقانوني ومطابق 100% لمعايير التصدير الرسمية لمنصة Turnitin."
 
         return result
 

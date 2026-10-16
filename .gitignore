@@ -10,6 +10,9 @@ uploads/
 
 # Strict privacy: Ignore all PDFs, DOCX, and student data
 *.pdf
+*.jpeg
+*.jpg
+*.png
 
 # Legacy client files & virtual environments
 app.py
