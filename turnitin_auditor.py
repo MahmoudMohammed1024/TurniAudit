@@ -190,14 +190,15 @@ class TurnitinStrictAuditor:
                     if cfont in basefont.lower() or cfont in alias.lower():
                         detected_counterfeit_fonts.add(basefont)
 
-        # فحص البايتات المباشرة للخطوط البديلة والمفتوحة
+        # فحص البايتات المباشرة للخطوط البديلة والمفتوحة في تعريفات الخطوط فقط
         for alias in cls.FORGERY_FONT_ALIASES:
-            for needle in [f"/{alias} ".encode(), f"/{alias}/".encode(), f"/{alias}\n".encode()]:
+            for needle in [f"/{alias} ".encode(), f"/{alias}/".encode(), f"/{alias}\n".encode(), f"/{alias}\r".encode()]:
                 if needle in raw_bytes:
                     detected_fake_aliases.add(alias)
 
+        raw_str = raw_bytes.decode('latin1', errors='ignore')
         for cfont in cls.FORGERY_COUNTERFEIT_FONTS:
-            if cfont.encode() in raw_lower:
+            if re.search(rf'/(?:BaseFont|FontName)\s*/[^\s/]*{cfont}', raw_str, re.I):
                 detected_counterfeit_fonts.add(cfont.title())
 
         # 3. فحص حقن الخطوط الخارجية ومستطيلات الطمس (White-out Overlay & Bundled Font)
@@ -207,20 +208,12 @@ class TurnitinStrictAuditor:
                            re.search(rb'1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[\d\.\s]+re\s*[BfbF]', raw_bytes))
 
         # 4. فحص بصمة قالب الغلاف الاصطناعي (pdf-lib drawText Synthesizer Footprint)
-        has_pdflib_synthesizer = False
-        p1_streams = b""
-        if page_count > 0:
-            for x in doc[0].get_contents():
-                p1_streams += doc.xref_stream(x)
-        p1_streams_str = p1_streams.decode('latin1', errors='ignore')
-        if ("0.388 0.388 0.388 RG" in p1_streams_str or "0.098 0.098 0.098 RG" in p1_streams_str or
-            re.search(r'Tf\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+RG\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+rg\s*\[<[0-9a-fA-F]+>\]TJ', p1_streams_str)):
-            has_pdflib_synthesizer = True
+        has_pdflib_synthesizer = ("0.388 0.388 0.388 RG" in raw_str or "0.098 0.098 0.098 RG" in raw_str)
 
-        # 5. فحص محركات وأدوات التزوير الخارجية غير الرسمية
+        # 5. فحص محركات وأدوات التزوير الخارجية غير الرسمية (في الميتاداتا فقط)
         detected_external_engine = None
         for eng in cls.FORGERY_EXTERNAL_ENGINES:
-            if eng.encode() in raw_lower or eng in producer.lower() or eng in creator.lower():
+            if eng in producer.lower() or eng in creator.lower():
                 detected_external_engine = eng
                 break
 

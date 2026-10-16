@@ -233,11 +233,16 @@ async function handleFile(file) {
                           (cleanP1.includes('Page 1 of') && cleanP1.includes('Cover Page'));
     const hasCoverPage = isModernCover || isClassicReceipt;
 
-    // فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة)
+    // فحص الخلل البرمجي الشهير في سكريبتات التزوير (تكرار نص الترويسة في نفس السطر)
     let hasHeaderDuplicationBug = false;
-    const p1Matches = (cleanP1.match(/Page 1 of/g) || []).length;
-    if (p1Matches > 1 && (isPdfLib || rawAnalysis.hasWhiteout || rawAnalysis.hasBundledFont || rawAnalysis.hasPdflibSynthesizer)) {
-      hasHeaderDuplicationBug = true;
+    if (rawAnalysis.fakeAliases.length > 0 || rawAnalysis.hasBundledFont) {
+      const p1Lines = p1Text.split(/[\r\n]+/);
+      for (const line of p1Lines) {
+        if ((line.match(/Page 1 of/gi) || []).length > 1) {
+          hasHeaderDuplicationBug = true;
+          break;
+        }
+      }
     }
 
     const hasStandardPagination = /Page\s+\d+\s+of\s+\d+/.test(cleanFull) || /صفحة\s+\d+\s+من\s+\d+/.test(cleanFull);
@@ -354,17 +359,16 @@ async function analyzeRawPdfBytes(bytes) {
   if (titleMatch) title = titleMatch[1].replace(/\\([()])/g, '$1');
 
   // فحص بصمة محرك التوليد الاصطناعي (pdf-lib drawText Synthesizer Footprint)
-  const hasPdflibSynthesizer = /0\.388\s+0\.388\s+0\.388\s+RG\s+0\.388\s+0\.388\s+0\.388\s+rg/.test(fullSample) ||
-                               /0\.098\s+0\.098\s+0\.098\s+RG\s+0\.098\s+0\.098\s+0\.098\s+rg/.test(fullSample) ||
-                               /Tf\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+RG\s+[\d\.]+\s+[\d\.]+\s+[\d\.]+\s+rg\s*\[<[0-9a-fA-F]+>\]TJ/.test(fullSample);
+  const hasPdflibSynthesizer = /0\.388\s+0\.388\s+0\.388\s+RG\s+0\.388\s+0\.388\s+0\.388\s+rg/.test(rawText) ||
+                               /0\.098\s+0\.098\s+0\.098\s+RG\s+0\.098\s+0\.098\s+0\.098\s+rg/.test(rawText);
 
   // فحص حقن الخطوط الخارجية المستقلة (مثل bundled_font)
-  const hasBundledFont = fullSample.includes('bundled_font');
+  const hasBundledFont = rawText.includes('bundled_font');
 
-  // فحص أسماء الخطوط الوهمية المستخدمة في التزوير
+  // فحص أسماء الخطوط الوهمية المستخدمة في التزوير (مفاتيح موارد الخطوط في PDF)
   const fakeAliases = [];
   ['NotoR', 'NotoSB', 'LexM', 'LexSB'].forEach(alias => {
-    if (fullSample.includes(`/${alias} `) || fullSample.includes(`/${alias}/`) || fullSample.includes(`/${alias}\n`)) {
+    if (rawText.includes(`/${alias} `) || rawText.includes(`/${alias}/`) || rawText.includes(`/${alias}\n`) || rawText.includes(`/${alias}\r`)) {
       fakeAliases.push(alias);
     }
   });
@@ -373,29 +377,30 @@ async function analyzeRawPdfBytes(bytes) {
   const genericFonts = [];
   ['Noto Sans Regular', 'Lexend Deca Medium', 'Noto Sans SemiBold', 'Lexend Deca SemiBold'].forEach(f => {
     const fHash = f.replace(/ /g, '#20');
-    if (fullSample.includes(f) || fullSample.includes(fHash)) {
+    if (rawText.includes(f) || rawText.includes(fHash)) {
       genericFonts.push(f);
     }
   });
 
-  // فحص الخطوط البديلة مفتوحة المصدر (بصمة سكريبتات التزوير على لينكس/بايثون)
+  // فحص الخطوط البديلة مفتوحة المصدر في قواميس تعريف الخطوط الرسمية فقط (/BaseFont /Liberation, إلخ)
   const counterfeitFonts = [];
   ['liberation', 'dejavu', 'freesans'].forEach(f => {
-    if (fullSample.toLowerCase().includes(f)) {
+    const fontRegex = new RegExp(`/(?:BaseFont|FontName)\\s*/[^\\s/]*${f}`, 'i');
+    if (fontRegex.test(rawText)) {
       counterfeitFonts.push(f.charAt(0).toUpperCase() + f.slice(1));
     }
   });
 
   // فحص كائنات ومستطيلات الطمس والتبييض (White-out Rectangles)
-  const hasWhiteout = /re\s*(?:h\s*)?1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[BfbF]/.test(fullSample) ||
-                      /1\s+1\s+1\s+rg[\s\S]{1,60}?re\s*(?:h\s*)?[BfbF]/.test(fullSample) ||
-                      /1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[\d\.\s]+re\s*[BfbF]/.test(fullSample);
+  const hasWhiteout = /re\s*(?:h\s*)?1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[BfbF]/.test(rawText) ||
+                      /1\s+1\s+1\s+rg[\s\S]{1,60}?re\s*(?:h\s*)?[BfbF]/.test(rawText) ||
+                      /1\s+1\s+1\s+RG\s+1\s+1\s+1\s+rg\s*[\d\.\s]+re\s*[BfbF]/.test(rawText);
 
-  // فحص محركات التوليد والتصدير الخارجية غير المصرح بها
+  // فحص محركات التوليد والتصدير الخارجية غير المصرح بها (في ميتاداتا Producer و Creator)
   let detectedExternalEngine = null;
   const externalEngines = ['mupdf', 'reportlab', 'weasyprint', 'wkhtmltopdf', 'fpdf', 'tcpdf', 'mpdf', 'itext', 'dompdf'];
   for (const eng of externalEngines) {
-    if (fullSample.toLowerCase().includes(eng) || producer.toLowerCase().includes(eng) || creator.toLowerCase().includes(eng)) {
+    if (producer.toLowerCase().includes(eng) || creator.toLowerCase().includes(eng)) {
       detectedExternalEngine = eng;
       break;
     }
