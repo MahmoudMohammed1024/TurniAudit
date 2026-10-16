@@ -846,13 +846,13 @@ body {
 .pdf-export-wrapper {
   position: fixed;
   top: 0;
-  left: 0;
+  left: -9999px; /* Strictly offscreen so it never renders over or behind the website UI */
   width: 794px; /* Standard A4 width at 96 DPI */
-  z-index: -9999;
   pointer-events: none;
   opacity: 1;
   visibility: visible;
   background: #ffffff;
+  display: none; /* Kept display: none until export is triggered */
 }
 
 /* Official Forensic Audit Certificate (A4 Clean White Paper Layout) */

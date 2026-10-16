@@ -860,6 +860,7 @@ btnSampleTampered.addEventListener('click', () => {
 function generateCertificateDom(res) {
   const wrapper = document.getElementById('pdfExportWrapper');
   if (!wrapper || !res) return;
+  wrapper.style.display = 'none';
 
   const serialNo = 'TA-' + Date.now().toString(36).toUpperCase() + '-' + Math.floor(1000 + Math.random() * 9000);
   const now = new Date();
@@ -1040,12 +1041,11 @@ async function downloadForensicPdf() {
     return;
   }
 
-  // Ensure element is visible and properly laid out for html2canvas
+  // Ensure element is positioned strictly offscreen for html2canvas capture
   wrapper.style.position = 'fixed';
   wrapper.style.top = '0';
-  wrapper.style.left = '0';
+  wrapper.style.left = '-9999px';
   wrapper.style.width = '794px';
-  wrapper.style.zIndex = '-9999';
   wrapper.style.opacity = '1';
   wrapper.style.visibility = 'visible';
   wrapper.style.display = 'block';
@@ -1080,12 +1080,14 @@ async function downloadForensicPdf() {
       // Fallback to native print if html2pdf encounters an exception
       window.print();
     } finally {
+      wrapper.style.display = 'none';
       btn.classList.remove('loading');
       btnText.textContent = originalText;
     }
   } else {
     // Fallback if script blocked
     window.print();
+    wrapper.style.display = 'none';
     btn.classList.remove('loading');
     btnText.textContent = originalText;
   }
@@ -1158,4 +1160,21 @@ langToggle.addEventListener('click', () => {
     generateCertificateDom(reEvaluated);
   }
 });
+
+// -------------------------------------------------------------
+// إعادة ضبط الفاحص لفحص ملف جديد (Reset Auditor)
+// -------------------------------------------------------------
+function resetAuditor() {
+  window.currentAuditResult = null;
+  const resultsSection = document.getElementById('resultsSection');
+  if (resultsSection) resultsSection.classList.add('hidden');
+  const fileInput = document.getElementById('fileInput');
+  if (fileInput) fileInput.value = '';
+  const wrapper = document.getElementById('pdfExportWrapper');
+  if (wrapper) {
+    wrapper.innerHTML = '';
+    wrapper.style.display = 'none';
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
